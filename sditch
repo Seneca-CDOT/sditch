@@ -59,6 +59,7 @@ function do_usage() {
 	echo "   writeon <file> ...write followed by poweron"
 	echo "   mount          microSD card partitions mounted under ${MOUNTPOINT}"
 	echo "   serial         start minicom for serial console monitoring"
+	echo "   video          start a video server (for observing a monitor)"
 	) >&2
 	exit 1
 }
