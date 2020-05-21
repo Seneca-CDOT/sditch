@@ -20,3 +20,22 @@ the microSD card connectors to plug into the two devices; we
 may produce a single thin PCB in the future, and will publish
 the board design if we do so).
 
+The script is also designed to manage a PDU controlling the 
+SBC; it's set for a Raritan PDU at this point but this can be
+readily adjusted.
+
+These are the commands accepted by the script:
+
+   status         status of the microSD mux
+   muxoff         microSD card not connected (mux off)
+   pi             microSD card connected to Pi
+   reader         microSD card connected to reader
+   [re]boot       microSD card connect to Pi, Pi started
+   poweron        ...same as boot
+   poweroff       shutdown and poweroff the Pi
+   shutdown       ...same as poweroff
+   read file      microSD card contents placed in file (.gz)
+   write file     microSD card written from file (.gz)
+   writeon file   ...write followed by poweron
+   mount          microSD card partitions mounted under /mnt/sd
+
