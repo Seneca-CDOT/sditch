@@ -22,7 +22,7 @@ PDU_MIB="/usr/share/snmp/mibs/raritan.mib" # PDU SNMP MIB
 PI_IP=""		# Pi IP address
 PI_USER="pi"		# user on Pi (with passwordless sudo and key access)
 PI_SHUTDOWN_TIME=10	# number of seconds to allow for Pi to shut down
-
+PI_KEEPOFF_TIME=45	# number of seconds to keep Pi off before boot
 
 source ${CONFIG_FILE}
 
@@ -112,7 +112,7 @@ function do_shutdown() {
 
 function do_boot() {
 	do_shutdown
-	sleep 20
+	sleep ${PI_KEEPOFF_TIME} 
 	do_pi
 	do_poweron
 }
