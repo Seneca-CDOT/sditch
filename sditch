@@ -1,0 +1,229 @@
+#!/bin/bash
+#
+# sditch :: sd (sw)itch
+#
+# This program manages the SD card mux
+#
+
+# Location of config file
+CONFIG_FILE=/home/pi/sditch.conf
+
+# These variables are overriden by the config file
+SELECT="14"		# gpio 14 is mux select
+DISABLE="15"		# gpio 15 is mux disable
+SELECT_PI="1"		# select value for is Pi
+SELECT_READER="$((1-SELECT_PI))"  
+DEVBASE="/dev/sda"	# base device node (unpartitioned block dev)
+MOUNTPOINT="/mnt/sd"	# directory for microSD partion mount points
+PDU_IP=""		# PDU IP address
+PDU_OUTLET=1		# PDU outlet number for Pi
+PDU_COMMUNITY=""	# PDU community name
+PDU_MIB="/usr/share/snmp/mibs/raritan.mib" # PDU SNMP MIB
+PI_IP=""		# Pi IP address
+PI_USER="pi"		# user on Pi (with passwordless sudo and key access)
+PI_SHUTDOWN_TIME=10	# number of seconds to allow for Pi to shut down
+
+
+source ${CONFIG_FILE}
+
+function init() {
+	gpio -g mode $SELECT out
+	gpio -g mode $DISABLE out
+	print_debug "gpio initialized"
+}
+
+function print_debug() {
+	#echo "$1"
+	:
+}
+
+function do_usage() {
+	(
+	echo "Usage: $(basename $0) <cmd>"
+	echo
+	echo "This command controls a microSD card mux that can"
+	echo "switch one microSD card between a card reader/writer"
+	echo "and a Raspberry Pi."
+	echo
+	echo "<cmd> is one of:"
+	echo "   status         status of the microSD mux"
+	echo "   muxoff         microSD card not connected (mux off)"
+	echo "   pi             microSD card connected to Pi"
+	echo "   reader         microSD card connected to reader"
+	echo "   [re]boot       microSD card connect to Pi, Pi started"
+	echo "   poweron        ...same as boot"
+	echo "   poweroff       shutdown and poweroff the Pi"
+	echo "   shutdown       ...same as poweroff"
+	echo "   read <file>    microSD card contents placed in file (.gz)"
+	echo "   write <file>   microSD card written from file (.gz)"
+	echo "   writeon <file> ...write followed by poweron"
+	echo "   mount          microSD card partitions mounted under ${MOUNTPOINT}"
+	) >&2
+	exit 1
+}
+
+function do_off() {
+	umount ${DEVBASE}* 2>/dev/null
+	gpio -g write $DISABLE on
+	print_debug "microSD disabled"
+}
+
+function do_on() {
+	gpio -g write $DISABLE off
+	print_debug "microSD enabled"
+}
+
+function do_pi() {
+	do_off
+	sleep 2
+	gpio -g write $SELECT $SELECT_PI
+	sleep 2
+	do_on
+	print_debug "microSD connected to the Pi"
+}
+
+function do_reader() {
+	do_off
+	sleep 0.2
+	gpio -g write $SELECT $SELECT_READER
+	print_debug "microSD connected to the reader"
+	sleep 0.2
+	do_on
+}
+
+function do_poweroff() {
+	snmpset -c $PDU_COMMUNITY -v 1 -m /usr/share/snmp/mibs/raritan.mib ${PDU_IP} .1.3.6.1.4.1.13742.4.1.2.2.1.3.${PDU_OUTLET} i 0 &>/dev/null
+	print_debug "powering off the pi"
+}
+
+function do_poweron() {
+	snmpset -c $PDU_COMMUNITY -v 1 -m /usr/share/snmp/mibs/raritan.mib ${PDU_IP} .1.3.6.1.4.1.13742.4.1.2.2.1.3.${PDU_OUTLET} i 1 &>/dev/null
+	print_debug "powering on the pi"
+}
+
+function do_shutdown() {
+	ssh ${PI_USER}@${PI_IP} sudo poweroff &>/dev/null
+	sleep ${PI_SHUTDOWN_TIME} 
+	do_poweroff
+	print_debug "shutting down the pi"
+}
+
+function do_boot() {
+	do_shutdown
+	sleep 20
+	do_pi
+	do_poweron
+}
+
+function do_read_setup() {
+	do_shutdown
+	do_poweroff
+	do_reader
+	sleep 10
+}
+
+function do_read() {
+	do_read_setup
+	print_debug "file to be written from microSD contents: '$1'"
+	echo "Copying microSD card to '$1' (gzip compressed)"
+	dd if=${DEVBASE} bs=1M status=progress|gzip >"$1"
+}
+
+function do_write() {
+	do_read_setup
+	print_debug "file to be written to microSD card: '$1'"
+	if [ -f "$1" ]
+	then
+		if [ "$(zcat "$1" 2>/dev/null | head -c1 | wc -c)" -eq 1 ]
+		then
+			echo "Copying '$1' (gzip compressed) to microSD card"
+			sleep 3 # allow time for panic ^C :-)
+			zcat "$1"|dd of="${DEVBASE}" bs=1M status=progress
+		else
+			echo "$(basename $0): file '$1' is not xz compressed" >&2
+			exit 2
+		fi
+	else
+		echo "$(basename $0): file '$1' does not exist" >&2
+		exit 3
+	fi
+}
+
+function do_writeon() {
+	do_write
+	do_boot
+}
+
+function do_mount() {
+	do_read_setup
+	if [ -b "${DEVBASE}" ]
+	then
+		for X in ${DEVBASE}?
+		do
+			if [ -b "$X" ]
+			then
+				print_debug "processing device $X"
+				N="${X/$DEVBASE/}"
+				print_debug "partition number $N"
+				mkdir -p "${MOUNTPOINT}/$N"
+				if mount "$X" "${MOUNTPOINT}/$N"
+				then
+					echo "Partition $X mounted at ${MOUNTPOINT}/$N"
+				fi
+			fi
+		done
+	else
+		echo "$(basename $0): no microSD card detected" >&2
+		exit 3
+	fi
+}
+
+function do_status() {
+	CURRENT_DISABLED="$(gpio -g read $DISABLE)"
+	CURRENT_SELECT="$(gpio -g read $SELECT)"
+	if [ "$CURRENT_DISABLED" -eq 1 ]
+	then
+		echo "microSD mux output is disabled"
+	else
+		if [ "$CURRENT_SELECT" -eq "$SELECT_READER" ]
+		then
+			echo "microSD card is connected to the card reader"
+		else
+			echo "microSD card is connected to the Pi"
+		fi
+	fi
+}
+
+function do_serial() {
+	minicom
+}
+
+init
+
+if [ "$(id -u)" -ne 0 ]
+then
+	print_debug "user ID is $(id -u)"
+	print_debug "Switching to root user..."
+	exec sudo $0 $@
+fi
+
+if [ $# -lt 1 ]
+then
+	do_usage >&2
+fi
+
+case "$1" in
+	"muxoff")			do_off;;
+	"pi") 				do_pi;;
+	"reader")			do_reader;;
+	"boot"|"reboot"|"poweron")	do_boot;;
+	"read")				do_read "$2";;
+	"write")			do_write "$2";;
+	"writeon")			do_writeon "$2";;
+	"mount")			do_mount;;
+	"status")			do_status;;
+	"poweroff"|"shutdown")		do_shutdown;;
+	"serial")			do_serial;;
+	*)				do_usage;;
+esac
+
