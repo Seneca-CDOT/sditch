@@ -39,3 +39,5 @@ These are the commands accepted by the script:
 *   writeon file -  ...write followed by poweron
 *   mount -         microSD card partitions mounted under /mnt/sd
 *   serial -        start minicom for serial console monitoring
+*   video -         start a video stream for attached CSI camera (useful for watching a video monitor)
+

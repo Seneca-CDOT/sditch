@@ -58,6 +58,7 @@ function do_usage() {
 	echo "   write <file>   microSD card written from file (.gz)"
 	echo "   writeon <file> ...write followed by poweron"
 	echo "   mount          microSD card partitions mounted under ${MOUNTPOINT}"
+	echo "   serial         start minicom for serial console monitoring"
 	) >&2
 	exit 1
 }
@@ -198,6 +199,17 @@ function do_serial() {
 	minicom
 }
 
+function do_video() {
+	echo "H.264 video server running on tcp port 5000"
+	echo "Access with: vlc tcp/h264://localhost:5000"
+	echo "Use an SSH tunnel for remote viewing."
+	while true
+	do 
+		raspivid -a 12 -t 0 -w 1920 -h 1080  -ih -fps 30 -l -o tcp://127.0.0.1:5000 
+		sleep 0.5
+	done
+}
+
 init
 
 if [ "$(id -u)" -ne 0 ]
@@ -224,6 +236,7 @@ case "$1" in
 	"status")			do_status;;
 	"poweroff"|"shutdown")		do_shutdown;;
 	"serial")			do_serial;;
+	"video")			do_video;;
 	*)				do_usage;;
 esac
 
