@@ -9,3 +9,14 @@ to be (re)imaged or copied, and the SBC to be booted from that
 card, without physical access -- good for automated testing (and
 remote access during a pandemic!)
 
+The actual MUX hardware consists of a pair of sn74sbt3257 chips
+interfaced to the control computer through GPIO lines. One GPIO
+controls the !OE (not output enable, i.e., output disable) line
+and the other controls the S (select) line on the mux chips.
+The A inputs on the chips are connected to the microSD card
+socket, and the B1/B2 outputs are connected to two microSD 
+outputs (we used the SparkFun microSD card sniffers to provide
+the microSD card connectors to plug into the two devices; we
+may produce a single thin PCB in the future, and will publish
+the board design if we do so).
+
