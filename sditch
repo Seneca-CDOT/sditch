@@ -152,7 +152,7 @@ function do_write() {
 }
 
 function do_writeon() {
-	do_write
+	do_write "$1"
 	do_boot
 }
 
