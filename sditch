@@ -2,8 +2,22 @@
 #
 # sditch :: sd (sw)itch
 #
-# This program manages the SD card mux
+# This program manages a storage multiplexer
+# to move a boot storage device (SD/microSD/USB drive)
+# between a single-board computer (SBC) such as a 
+# Raspberry Pi and a host computer (which could be
+# another SBC).
 #
+# The two main use-cases are:
+#   * SBC connected to a PDU and a GPIO-driven SD mux; or
+#   * SBC connected to a PDU and a USB auto-switch
+#     (where the storage is connected to the SBC whenever
+#     the SBC is turned on)
+#
+# (c)2020 Seneca College of Applied Arts and Technology
+# Written by Chris Tyler, Yanhao (Yan) Lei
+# Licensed under the GPL v2+
+# 
 
 # Location of config file
 CONFIG_FILE=/home/pi/sditch.conf
@@ -11,17 +25,17 @@ CONFIG_FILE=/home/pi/sditch.conf
 # These variables are overriden by the config file
 SELECT="14"		# gpio 14 is mux select
 DISABLE="15"		# gpio 15 is mux disable
-SELECT_PI="1"		# select value for is Pi
+SELECT_PI="1"		# select value for is SBC
 SELECT_READER="$((1-SELECT_PI))"
-MOUNTPOINT="/mnt/sd"	# directory for microSD partion mount points
+MOUNTPOINT="/mnt/sd"	# directory for partion mount points
 PDU_IP=""		# PDU IP address
-PDU_OUTLET=1		# PDU outlet number for Pi
+PDU_OUTLET=1		# PDU outlet number for SBC 
 PDU_COMMUNITY=""	# PDU community name
 PDU_MIB="/usr/share/snmp/mibs/raritan.mib" # PDU SNMP MIB
-PI_IP=""		# Pi IP address
-PI_USER="pi"		# user on Pi (with passwordless sudo and key access)
-PI_SHUTDOWN_TIME=10	# number of seconds to allow for Pi to shut down
-PI_KEEPOFF_TIME=45	# number of seconds to keep Pi off before boot
+PI_IP=""		# SBC IP address
+PI_USER="pi"		# user on SBC (with passwordless sudo and key access)
+PI_SHUTDOWN_TIME=10	# number of seconds to allow for SBC to shut down
+PI_KEEPOFF_TIME=45	# number of seconds to keep SBC off before boot
 
 source ${CONFIG_FILE}
 
@@ -71,23 +85,25 @@ function do_usage() {
 	(
 	echo "Usage: $(basename $0) <cmd>"
 	echo
-	echo "This command controls a microSD card mux that can"
-	echo "switch one microSD card between a card reader/writer"
-	echo "and a Raspberry Pi."
+	echo "This command controls a mux that can switch"
+	echo "a storage device card (SD/microSD/USB drive)"
+	echo "between a card reader/writer and an SBC such"
+	echo "as a Raspberry Pi."
 	echo
 	echo "<cmd> is one of:"
-	echo "   status         status of the microSD mux"
-	echo "   muxoff         microSD card not connected (mux off)"
-	echo "   pi             microSD card connected to Pi"
-	echo "   reader         microSD card connected to reader"
-	echo "   [re]boot       microSD card connect to Pi, Pi started"
+	echo "   status         status of the  mux"
+	echo "   muxoff         storage not connected (mux off)"
+	echo "   sbc            storage connected to SBC"
+	echo "   pi             ...same as sbc"
+	echo "   reader         storage connected to reader"
+	echo "   [re]boot       storage connect to SBC, SBC started"
 	echo "   poweron        ...same as boot"
-	echo "   poweroff       shutdown and poweroff the Pi"
+	echo "   poweroff       shutdown and poweroff the SBC"
 	echo "   shutdown       ...same as poweroff"
-	echo "   read <file>    microSD card contents placed in file (.gz)"
-	echo "   write <file>   microSD card written from file (.gz)"
+	echo "   read <file>    storage contents placed in file (.gz)"
+	echo "   write <file>   storage written from file (.gz)"
 	echo "   writeon <file> ...write followed by poweron"
-	echo "   mount          microSD card partitions mounted under ${MOUNTPOINT}"
+	echo "   mount          storage partitions mounted under ${MOUNTPOINT}"
 	echo "   serial         start minicom for serial console monitoring"
 	echo "   video          start a video server (for observing a monitor)"
 	) >&2
@@ -97,12 +113,12 @@ function do_usage() {
 function do_off() {
 	umount ${devbase}* 2>/dev/null
 	gpio -g write $DISABLE on
-	print_debug "microSD disabled"
+	print_debug "mux disabled"
 }
 
 function do_on() {
 	gpio -g write $DISABLE off
-	print_debug "microSD enabled"
+	print_debug "mux enabled"
 }
 
 function do_pi() {
@@ -111,14 +127,14 @@ function do_pi() {
 	gpio -g write $SELECT $SELECT_PI
 	sleep 2
 	do_on
-	print_debug "microSD connected to the Pi"
+	print_debug "storage connected to the SBC"
 }
 
 function do_reader() {
 	do_off
 	sleep 0.2
 	gpio -g write $SELECT $SELECT_READER
-	print_debug "microSD connected to the reader"
+	print_debug "storage connected to the reader"
 	sleep 0.2
 	do_on
 }
@@ -156,23 +172,23 @@ function do_read_setup() {
 
 function do_read() {
 	do_read_setup
-	print_debug "file to be written from microSD contents: '$1'"
-	echo "Copying microSD card to '$1' (gzip compressed)"
+	print_debug "file to be written from storage contents: '$1'"
+	echo "Copying storage to '$1' (gzip compressed)"
 	dd if=${devbase} bs=1M status=progress|gzip >"$1"
 }
 
 function do_write() {
 	do_read_setup
-	print_debug "file to be written to microSD card: '$1'"
+	print_debug "file to be written to storage: '$1'"
 	if [ -f "$1" ]
 	then
 		if [ "$(zcat "$1" 2>/dev/null | head -c1 | wc -c)" -eq 1 ]
 		then
-			echo "Copying '$1' (gzip compressed) to microSD card"
+			echo "Copying '$1' (gzip compressed) to storage"
 			sleep 3 # allow time for panic ^C :-)
 			zcat "$1"|dd of="${devbase}" bs=1M status=progress
 		else
-			echo "$(basename $0): file '$1' is not xz compressed" >&2
+			echo "$(basename $0): file '$1' is not gzip compressed" >&2
 			exit 2
 		fi
 	else
@@ -221,7 +237,7 @@ function do_status() {
 		then
 			echo "microSD card is connected to the card reader"
 		else
-			echo "microSD card is connected to the Pi"
+			echo "microSD card is connected to the SBC"
 		fi
 	fi
 }
@@ -252,7 +268,7 @@ fi
 
 if [ $# -lt 1 ]
 then
-	do_usage >&2
+	do_usage 
 fi
 
 get_base_device
