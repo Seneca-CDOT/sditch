@@ -12,8 +12,7 @@ CONFIG_FILE=/home/pi/sditch.conf
 SELECT="14"		# gpio 14 is mux select
 DISABLE="15"		# gpio 15 is mux disable
 SELECT_PI="1"		# select value for is Pi
-SELECT_READER="$((1-SELECT_PI))"  
-DEVBASE="/dev/sda"	# base device node (unpartitioned block dev)
+SELECT_READER="$((1-SELECT_PI))"
 MOUNTPOINT="/mnt/sd"	# directory for microSD partion mount points
 PDU_IP=""		# PDU IP address
 PDU_OUTLET=1		# PDU outlet number for Pi
@@ -30,6 +29,37 @@ function init() {
 	gpio -g mode $SELECT out
 	gpio -g mode $DISABLE out
 	print_debug "gpio initialized"
+}
+
+function get_base_device() {
+	# duck-tape solution for detecting base device
+	if [ -n "${DEVBASEPATH}" ]
+	then
+		if [ -b "${DEVBASEPATH}" ]
+		then
+			devbase="${DEVBASEPATH}"
+		else
+			echo "$(basename $0): [${DEVBASEPATH}] is not a block device" >&2
+			exit 3
+		fi
+	elif [ -n "${DEVBASENAME}" ]
+	then
+		# base device node (unpartitioned block dev)
+		# sdparm returns a list of devices in the format:
+		#
+		# [device_path]: [device_name]
+		#
+		# base on the name, we can identify which device to use by default
+		devbase=$(sdparm --readonly /dev/sd* | grep -E "/dev/sd[a-z]:" | grep -F "${DEVBASENAME}" | cut -d ':' -f 1 | sed 's/\s//g') 2>/dev/null
+
+		if [ -z "$devbase" ]
+		then
+			echo "$(basename $0): [${DEVBASENAME}] not found in device list" >&2
+			exit 3
+		fi
+	fi
+
+	echo "selected device: [$devbase]"
 }
 
 function print_debug() {
@@ -65,7 +95,7 @@ function do_usage() {
 }
 
 function do_off() {
-	umount ${DEVBASE}* 2>/dev/null
+	umount ${devbase}* 2>/dev/null
 	gpio -g write $DISABLE on
 	print_debug "microSD disabled"
 }
@@ -128,7 +158,7 @@ function do_read() {
 	do_read_setup
 	print_debug "file to be written from microSD contents: '$1'"
 	echo "Copying microSD card to '$1' (gzip compressed)"
-	dd if=${DEVBASE} bs=1M status=progress|gzip >"$1"
+	dd if=${devbase} bs=1M status=progress|gzip >"$1"
 }
 
 function do_write() {
@@ -140,7 +170,7 @@ function do_write() {
 		then
 			echo "Copying '$1' (gzip compressed) to microSD card"
 			sleep 3 # allow time for panic ^C :-)
-			zcat "$1"|dd of="${DEVBASE}" bs=1M status=progress
+			zcat "$1"|dd of="${devbase}" bs=1M status=progress
 		else
 			echo "$(basename $0): file '$1' is not xz compressed" >&2
 			exit 2
@@ -152,20 +182,20 @@ function do_write() {
 }
 
 function do_writeon() {
-	do_write
+	do_write "$1"
 	do_boot
 }
 
 function do_mount() {
 	do_read_setup
-	if [ -b "${DEVBASE}" ]
+	if [ -b "${devbase}" ]
 	then
-		for X in ${DEVBASE}?
+		for X in ${devbase}?
 		do
 			if [ -b "$X" ]
 			then
 				print_debug "processing device $X"
-				N="${X/$DEVBASE/}"
+				N="${X/$devbase/}"
 				print_debug "partition number $N"
 				mkdir -p "${MOUNTPOINT}/$N"
 				if mount "$X" "${MOUNTPOINT}/$N"
@@ -224,6 +254,8 @@ if [ $# -lt 1 ]
 then
 	do_usage >&2
 fi
+
+get_base_device
 
 case "$1" in
 	"muxoff")			do_off;;
